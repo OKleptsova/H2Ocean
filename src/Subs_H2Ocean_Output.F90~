@@ -1,0 +1,646 @@
+SUBROUTINE H2Ocean_Output_Initialize
+  USE Mod_All_Variable
+  IMPLICIT NONE
+  
+  
+  IF(output_end_time <1.0d-5) THEN
+      output_end_time = final_time
+  ENDIF
+  
+  IF(enable_vel_output) THEN
+      CALL H2Ocean_Vel_Output_Initialize
+  ENDIF
+ 
+  IF(enable_station_output) THEN
+       CALL H2Ocean_Station_Output_Initialize
+  ENDIF
+  
+  IF(enable_station_vel_output) THEN
+       CALL H2Ocean_Station_vel_Output_Initialize
+  ENDIF  
+
+  IF(enable_altim_output) THEN
+       CALL H2Ocean_Altim_Output_Initialize
+  ENDIF 
+  
+
+  CALL H2Ocean_Output_Once 
+  
+END SUBROUTINE H2Ocean_Output_Initialize
+
+
+SUBROUTINE H2Ocean_Vel_Output_Initialize
+  USE Mod_All_Variable
+  USE Mod_IO
+  USE Mod_Precision
+  USE Mod_TriMesh
+  USE Mod_Parameter
+  IMPLICIT NONE
+  INTEGER :: FEXIST, RES, STATUS
+  INTEGER :: fid
+  INTEGER(KIND=INT_KIND) :: edg
+  
+  fid = get_file_unit();   
+  
+  OPEN(fid, file=TRIM(ADJUSTL(output_folder))//'vel_position.txt',status="replace")
+  WRITE(fid,*) TriMesh_edgenmb
+  IF(Coordinate_type == 2) THEN
+      DO edg=1,TriMesh_edgenmb
+          WRITE(fid,'(2e15.8)') edge(edg)%x/rad, edge(edg)%y/rad
+      ENDDO     
+  ELSEIF(Coordinate_type == 1) THEN
+      DO edg=1,TriMesh_edgenmb
+          WRITE(fid,'(2e15.8)') edge(edg)%x, edge(edg)%y
+      ENDDO       
+  ENDIF
+  CLOSE(fid)
+
+END SUBROUTINE H2Ocean_Vel_Output_Initialize
+ 
+SUBROUTINE H2Ocean_Station_Output_Initialize
+  !USE IFPORT
+  USE Mod_IO
+  USE Mod_All_Variable
+  USE MOd_TriMesh
+  USE Mod_Parameter
+  USE Mod_TriMesh_Interp
+  
+  IMPLICIT NONE
+  INTEGER :: RES, STATUS
+  LOGICAL :: FEXIST
+  INTEGER :: fid, i
+  CHARACTER(len=400)     :: string, filename
+  INTEGER(KIND=INT_KIND) :: el
+  REAL(KIND=REAL_DP)     :: x0, y0
+  
+  
+  
+  CALL INQUIRE_FILE(TRIM(station_file),FEXIST)
+  IF(.not.FEXIST) THEN
+      WRITE(*,*) 'The station xy file doen not exist, please check the control file.'
+  ENDIF  
+  fid = get_file_unit()
+  ! READ station number
+  OPEN (fid, file=TRIM(station_file), status='old')   
+  READ(fid,*) n_station 
+  
+  ALLOCATE(station_info(n_station,3)) 
+  
+  ALLOCATE(station_el(n_station))
+   
+  DO i=1,n_station
+      READ(fid,*) station_info(i,1),station_info(i,2),station_info(i,3) 
+      IF( Coordinate_type == 2) THEN
+          station_info(i,2) = station_info(i,2)*rad
+          station_info(i,3) = station_info(i,3)*rad
+      ENDIF   
+  ENDDO
+  CLOSE(fid)
+  
+  ! Build station_el
+  DO i=1,n_station
+      x0 = station_info(i,2)
+      y0 = station_info(i,3)
+      CALL Point_Nearest_Element(x0,y0,station_el(i))
+  ENDDO    
+  
+  station_fid  = get_file_unit();
+  filename = TRIM(ADJUSTL(output_folder))//'station_data.txt'
+  OPEN (station_fid, file=TRIM(filename), status='replace')    
+END SUBROUTINE H2Ocean_Station_Output_Initialize
+ 
+SUBROUTINE H2Ocean_Station_vel_Output_Initialize
+  !USE IFPORT
+  USE Mod_IO
+  USE Mod_All_Variable
+  USE MOd_TriMesh
+  USE Mod_Parameter
+  IMPLICIT NONE
+  INTEGER :: RES, STATUS
+  LOGICAL :: FEXIST
+  INTEGER :: fid, i
+  CHARACTER(len=400)   :: string, filename
+  
+  INTEGER(KIND=INT_KIND) :: edg
+  REAL(KIND=REAL_DP)     :: x0,y0,distance(TriMesh_edgenmb)
+  INTEGER(KIND=INT_KIND) :: min_pos(1)  
+  
+  
+  
+  CALL INQUIRE_FILE(TRIM(station_vel_file),FEXIST)
+  IF(.not.FEXIST) THEN
+      WRITE(*,*) 'The station vel xy file doen not exist, please check the control file.'
+  ENDIF  
+  fid = get_file_unit()
+  ! READ station number
+  OPEN (fid, file=TRIM(station_vel_file), status='old')   
+  READ(fid,*) n_station_vel 
+  
+  ALLOCATE(station_vel_info(n_station_vel,3)) 
+  ALLOCATE(station_vel_edg(n_station_vel))
+  
+   
+  DO i=1,n_station_vel
+      READ(fid,*) station_vel_info(i,1),station_vel_info(i,2),station_vel_info(i,3)
+      IF( Coordinate_type == 2) THEN
+          station_vel_info(i,2) = station_vel_info(i,2)*rad
+          station_vel_info(i,3) = station_vel_info(i,3)*rad
+      ENDIF   
+  ENDDO
+  CLOSE(fid)
+  
+  ! Build station_el
+  DO i=1,n_station_vel
+      x0 = station_vel_info(i,2)
+      y0 = station_vel_info(i,3)
+      DO edg = 1,TriMesh_edgenmb
+          distance(edg) = (x0-edge(edg)%x)**2 + (y0-edge(edg)%y)**2
+      ENDDO
+      min_pos = MINLOC(distance)
+      station_vel_edg(i) = min_pos(1)
+  ENDDO    
+ 
+  station_vel_fid  = get_file_unit();
+  filename = TRIM(ADJUSTL(output_folder))//'station_vel_data.txt'
+  OPEN (station_vel_fid, file=TRIM(filename), status='replace')  
+
+END SUBROUTINE H2Ocean_Station_vel_Output_Initialize
+
+
+SUBROUTINE  H2Ocean_Altim_Output_Initialize
+ ! USE IFPORT
+  USE Mod_IO
+  USE Mod_All_Variable
+  USE MOd_TriMesh
+  USE Mod_Parameter
+  USE Mod_TriMesh_Interp
+  
+  IMPLICIT NONE
+  INTEGER :: RES, STATUS
+  LOGICAL :: FEXIST
+  INTEGER :: fid, i
+  CHARACTER(len=400)     :: string, filename
+  INTEGER(KIND=INT_KIND) :: el
+  REAL(KIND=REAL_DP)     :: x0, y0
+!Varibles for OpenMP
+!$  integer :: chunk, chunksize  
+!$  integer :: nthreads,OMP_GET_NUM_THREADS, OMP_GET_THREAD_NUM     
+!$  integer :: mythread   
+  
+  
+  CALL INQUIRE_File(TRIM(altim_file), FEXIST)
+  IF(.not.FEXIST) THEN
+      WRITE(*,*) 'The altim xy file doen not exist, please check the control file.'
+  ENDIF  
+  fid = get_file_unit()
+  ! READ station number
+  OPEN (fid, file=TRIM(altim_file), status='old')   
+  READ(fid,*) n_altim 
+  
+  ALLOCATE(altim_info(n_altim,6)) 
+  
+  altim_info = 0.0d0
+   
+  DO i=1,n_altim
+      READ(fid,*) altim_info(i,1:5)   
+  ENDDO
+  CLOSE(fid)
+  
+  
+!!$OMP   PARALLEL PRIVATE(i,x0,y0,mythread)  &
+!!$OMP&         SHARED(n_altim,altim_info,altim_el,  &
+!!$OMP&         CHUNK,nthreads)
+!
+!!$ NTHREADS = OMP_GET_NUM_THREADS()
+!!$  CHUNK = int(n_altim/NTHREADS)+1  
+!!$OMP DO SCHEDULE(DYNAMIC,CHUNK)  
+  ! Build altim_el
+  
+  
+!  DO i=1,n_altim
+!      x0 = altim_info(i,2)
+!      y0 = altim_info(i,3)
+!      CALL Point_Nearest_Element(x0,y0,altim_el(i))
+!  ENDDO 
+  
+  
+!!$OMP END DO
+!!$OMP END PARALLEL    
+
+WRITE(*,*) 'Finish H2Ocean_Altim_Output_Initialize'  
+END SUBROUTINE  H2Ocean_Altim_Output_Initialize
+ 
+ 
+ 
+SUBROUTINE H2Ocean_Output
+  USE Mod_All_Variable
+  IMPLICIT NONE
+  
+  
+  IF(enable_altim_output) THEN
+      CALL H2Ocean_Update_Altim_Info_V2
+  ENDIF
+  
+  
+  
+  IF(output_method == 1) THEN
+      IF(MOD(i_run,output_int)==0) then
+          CALL H2Ocean_Output_Once
+      ENDIF
+  ELSEIF(output_method == 2) THEN
+      output_real_count = output_real_count + dt
+      IF( output_real - output_real_count <= 1.0e-5) THEN
+          CALL H2Ocean_Output_Once
+          output_real_count = output_real_count-output_real  
+      ENDIF               
+  ENDIF
+  
+  station_output_real_count = station_output_real_count + dt  
+  IF(enable_station_output) THEN
+      IF(station_output_real-station_output_real_count<=1.0e-5) THEN
+          CALL H2Ocean_Station_OutputOnce
+      ENDIF    
+  ENDIF  
+  IF(enable_station_vel_output) THEN
+      IF(station_output_real-station_output_real_count<=1.0e-5) THEN
+          CALL H2Ocean_Station_vel_OutputOnce
+      ENDIF    
+  ENDIF    
+  IF(station_output_real-station_output_real_count<=1.0e-5) THEN
+      station_output_real_count = station_output_real_count -station_output_real
+  ENDIF
+   
+   
+ 
+   
+END SUBROUTINE H2Ocean_Output
+ 
+SUBROUTINE H2Ocean_Output_Once
+  USE Mod_All_Variable
+  IMPLICIT NONE
+  
+  
+  IF(time_run >= output_start_time .AND. time_run <= output_end_time) THEN
+      IF(output_to_bin) THEN
+          CALL H2Ocean_BIN_Output_Once
+      ENDIF
+  ENDIF  
+   
+   
+   !Here is specify for the Japan Pacific runs
+!   IF(time_run >= 230*60 .AND. time_run <= 240*60) THEN
+!      IF(output_to_bin) THEN
+!          CALL H2Ocean_BIN_Output_Once
+!      ENDIF
+!  ENDIF
+!
+!   IF(time_run >= 320*60 .AND. time_run <= 340*60) THEN
+!      IF(output_to_bin) THEN
+!          CALL H2Ocean_BIN_Output_Once
+!      ENDIF
+!  ENDIF
+!  
+!    IF(time_run >= 450*60 .AND. time_run <= 470*60) THEN
+!      IF(output_to_bin) THEN
+!          CALL H2Ocean_BIN_Output_Once
+!      ENDIF
+!  ENDIF 
+  
+  IF(enable_zeta_max_output) THEN
+      IF(MOD(maxmin_output_count,10)==0) THEN
+          CALL H2Ocean_Zeta_Max_Output_Once
+      ENDIF
+      maxmin_output_count = maxmin_output_count + 1
+  ENDIF
+  
+  IF(enable_altim_output) THEN
+      CALL H2Ocean_altim_Output_Once
+  ENDIF
+  
+END SUBROUTINE H2Ocean_Output_Once
+ 
+SUBROUTINE H2Ocean_Time_Output_Once
+  USE Mod_IO
+  USE Mod_H2Ocean
+  USE Mod_All_Variable
+  IMPLICIT NONE
+  WRITE(fid_time,'(f15.5)') time_run
+END SUBROUTINE H2Ocean_Time_Output_Once
+!
+SUBROUTINE H2Ocean_Zeta_Max_Output_Once
+  USE Mod_Precision
+  USE Mod_All_Variable
+  USE Mod_Precision
+  USE Mod_IO
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  IMPLICIT NONE
+  INTEGER  :: fid 
+  CHARACTER(len=400) ::  filename  
+  INTEGER(KIND=INT_KIND) :: nd  
+  fid = get_file_unit()
+  filename =  TRIM(ADJUSTL(output_folder))//'zeta_max.txt'  
+  fid= get_file_unit()
+  OPEN(unit=fid, file=filename,status="replace")
+  DO nd = 1, TriMesh_nodenmb                 
+      WRITE(fid,'(f15.5)') zeta_max(nd)   !waterlevel_elem.txt   
+      
+ 
+  ENDDO
+  CLOSE(fid)
+  
+  
+  
+  fid = get_file_unit()
+  filename =  trim(adjustl(output_folder))//'zeta_min.txt'  
+  fid= get_file_unit()
+  OPEN(unit=fid, file=filename,status="replace")
+  DO nd = 1, TriMesh_nodenmb                 
+      WRITE(fid,'(f15.5)') zeta_min(nd)   !waterlevel_elem.txt   
+  ENDDO
+  CLOSE(fid)
+  
+END SUBROUTINE H2Ocean_Zeta_Max_Output_Once
+
+
+SUBROUTINE H2Ocean_Update_Altim_Info_V2
+  USE Mod_Precision
+  USE Mod_All_Variable
+  USE Mod_Precision
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  USE Mod_TriMesh_Interp
+  USE Mod_Parameter
+  IMPLICIT NONE
+  INTEGER(KIND=INT_KIND)  :: i, nd
+  
+  INTEGER(KIND=INT_KIND)  :: el 
+  REAL(kind=REAL_DP)      :: z_out,z0,z1, xin, yin
+  REAL(kind=REAL_DP)      :: t_altim
+  REAL(kind=REAL_DP)      :: zeta0_in(TriMesh_nodenmb), zeta1_in(TriMesh_nodenmb)
+  INTEGER(KIND=INT_KIND)  :: min_pos(1) 
+  REAL(kind=REAL_DP)      :: distance(TriMesh_nodenmb)
+  
+  INTEGER(KIND=INT_KIND)  :: i_ngb,nd_ngb 
+  
+  REAL(kind=REAL_DP),ALLOCATABLE,DIMENSION(:)  :: xd,yd,zd 
+  INTEGER(KIND=INT_KIND)           :: nzd
+  
+  zeta0_in = zeta0
+  zeta1_in = zeta1
+  
+  WHERE(zeta0+ Still_Depth < h_min) zeta0_in = 0.0d0
+  WHERE(zeta1+ Still_Depth < h_min) zeta1_in = 0.0d0
+  
+  
+  DO i=1,n_altim
+       xin = altim_info(i,2)
+       yin = altim_info(i,3)
+       IF( Coordinate_type == 2) THEN
+          xin = xin*rad
+          yin = yin*rad
+       ENDIF 
+       t_altim = altim_info(i,5)
+       t_altim = t_altim*60;  ! convert to seconds
+
+       IF (t_altim>=time_run-dt  .AND. t_altim< time_run) THEN
+           
+           
+           DO nd=1,TriMesh_nodenmb
+              distance(nd) = sqrt((xin-node(nd)%x)**2+(yin-node(nd)%y)**2)  
+           ENDDO         
+           min_pos = minloc(distance)
+            
+           IF(node_ngb_elements(min_pos(1))%nmb == 1) THEN
+               el = node_ngb_elements(min_pos(1))%addresses(1)
+               CALL TriMesh_Interp_Element(xin,yin,el,zeta1_in,z1) 
+               CALL TriMesh_Interp_Element(xin,yin,el,zeta0_in,z0) 
+           ELSE
+               nzd = node_ngb_nodes(min_pos(1))%nmb
+               ALLOCATE(xd(nzd),yd(nzd),zd(nzd))
+               DO i_ngb = 1, nzd
+                   nd_ngb     = node_ngb_nodes(min_pos(1))%addresses(i_ngb)
+                   xd(i_ngb)  = real(node(nd_ngb)%x)
+                   yd(i_ngb)  = real(node(nd_ngb)%y)
+                   zd(i_ngb)  = real(zeta1_in(nd_ngb))
+               ENDDO
+               
+               CALL Interp2D_bivar(xin,yin,nzd,xd,yd,zd,z1)
+               
+               zd  = real(zeta0_in(node_ngb_nodes(min_pos(1))%addresses))
+               CALL Interp2D_bivar(xin,yin,nzd,xd,yd,zd,z0)
+               DEALLOCATE(xd,yd,zd)
+
+           ENDIF    
+           
+           
+           
+           z_out = z0 + (z1-z0)/(dt)*(t_altim-time_run+dt)
+           altim_info(i,6) = z_out
+       ENDIF
+  ENDDO
+END SUBROUTINE H2Ocean_Update_Altim_Info_V2
+
+
+
+
+SUBROUTINE H2Ocean_Update_Altim_Info
+  USE Mod_Precision
+  USE Mod_All_Variable
+  USE Mod_Precision
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  USE Mod_TriMesh_Interp
+  USE Mod_Parameter
+  IMPLICIT NONE
+  INTEGER(KIND=INT_KIND)  :: i, nd
+  
+  INTEGER(KIND=INT_KIND)  :: el 
+  REAL(kind=REAL_DP)      :: z_out,z0,z1, xin, yin
+  REAL(kind=REAL_DP)      :: t_altim
+  REAL(kind=REAL_DP)      :: zeta0_in(TriMesh_nodenmb), zeta1_in(TriMesh_nodenmb)
+  
+  zeta0_in = zeta0
+  zeta1_in = zeta1
+  
+  WHERE(zeta0+ Still_Depth < h_min) zeta0_in = 0.0d0
+  WHERE(zeta1+ Still_Depth < h_min) zeta1_in = 0.0d0
+  
+  
+  DO i=1,n_altim
+       xin = altim_info(i,2)
+       yin = altim_info(i,3)
+       IF( Coordinate_type == 2) THEN
+          xin = xin*rad
+          yin = yin*rad
+       ENDIF 
+       t_altim = altim_info(i,5)
+       t_altim = t_altim*60;  ! convert to seconds
+
+       IF (t_altim>=time_run-dt  .AND. t_altim< time_run) THEN
+   
+           CALL Point_Nearest_Element(xin,yin,el)
+           CALL TriMesh_Interp_Element(xin,yin,el,zeta1_in,z1) 
+           CALL TriMesh_Interp_Element(xin,yin,el,zeta0_in,z0) 
+           z_out = z0 + (z1-z0)/(dt)*(t_altim-time_run+dt)
+           altim_info(i,6) = z_out
+       ENDIF
+  ENDDO
+END SUBROUTINE H2Ocean_Update_Altim_Info
+
+
+SUBROUTINE H2Ocean_altim_Output_Once
+  USE Mod_Precision
+  USE Mod_All_Variable
+  USE Mod_Precision
+  USE Mod_IO
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  IMPLICIT NONE
+  INTEGER  :: fid 
+  CHARACTER(len=400) ::  filename  
+  INTEGER(KIND=INT_KIND) :: nd  
+  fid = get_file_unit()
+  filename =  trim(adjustl(output_folder))//'altim_model.txt' 
+  fid= get_file_unit()
+  OPEN(unit=fid, file=filename,status="replace")
+  DO nd = 1, n_altim                 
+      WRITE(fid,'(I4.4,5f15.5)') int(altim_info(nd,1)),altim_info(nd,2:6)    
+  ENDDO
+  CLOSE(fid)
+END SUBROUTINE H2Ocean_altim_Output_Once
+
+
+
+SUBROUTINE H2Ocean_BIN_Output_Once
+  USE Mod_Precision
+  USE Mod_All_Variable
+  USE Mod_H2Ocean
+  USE Mod_TriMesh
+  USE Mod_IO
+  IMPLICIT NONE
+  INTEGER  :: fid,fid_vel,fid_q, fid_w
+  CHARACTER(len=400) :: xstring, filename  
+  INTEGER(KIND=INT_KIND) :: nd,edg
+    !Varibles for OpenMP
+!!$  integer :: chunk, chunksize  
+!!$  integer :: nthreads, tid, OMP_GET_NUM_THREADS, OMP_GET_THREAD_NUM     
+!!$  integer :: mythread  
+
+    
+
+
+
+
+  WRITE (xstring,'(I4.4)') bin_output_count  
+  
+  
+!!$OMP   PARALLEL PRIVATE(filename,nd,edg,mythread)  &
+!!$OMP&           SHARED(nthreads)    
+!  
+!!$  NTHREADS = OMP_GET_NUM_THREADS()
+!
+!!$OMP SECTIONS
+!
+!!$OMP SECTION  
+  IF(enable_zeta_output) THEN 
+      filename =  trim(adjustl(output_folder))//'eta_'//TRIM(ADJUSTL(xstring))//'.bin'
+      fid= get_file_unit()
+      OPEN(unit=fid,form='UNFORMATTED', file=filename,&
+               status="replace")
+      DO nd = 1, TriMesh_nodenmb                 
+          WRITE(fid) zeta1(nd)   !waterlevel_elem.txt   
+      ENDDO
+      CLOSE(fid)
+  ENDIF
+  
+! !$OMP SECTION 
+  IF(enable_vel_output) THEN 
+      filename =  trim(adjustl(output_folder))//'vel_'//TRIM(ADJUSTL(xstring))//'.bin'
+      fid_vel= get_file_unit()
+      OPEN(unit=fid_vel,form='UNFORMATTED', file=filename,&
+               status="replace")
+      DO edg = 1, TriMesh_edgenmb                 
+          WRITE(fid_vel)  velocity1(edg)%u, velocity1(edg)%v 
+      ENDDO
+      CLOSE(fid_vel)
+  ENDIF
+  
+! !$OMP SECTION  
+  IF(enable_q_output .AND. enable_nonhydro) THEN 
+      filename =  trim(adjustl(output_folder))//'q_'//TRIM(ADJUSTL(xstring))//'.bin'
+      fid_q= get_file_unit()
+      OPEN(unit=fid_q,form='UNFORMATTED', file=filename,&
+               status="replace")
+      DO nd = 1, TriMesh_nodenmb                 
+          WRITE(fid_q) q(nd)   !waterlevel_elem.txt   
+      ENDDO
+      CLOSE(fid_q)
+  ENDIF
+! !$OMP SECTION    
+  IF(enable_w_output .AND. enable_nonhydro) THEN 
+      filename =  trim(adjustl(output_folder))//'w_'//TRIM(ADJUSTL(xstring))//'.bin'
+      fid_w= get_file_unit()
+      OPEN(unit=fid_w,form='UNFORMATTED', file=filename,&
+               status="replace")
+      DO nd = 1, TriMesh_nodenmb                 
+          WRITE(fid_w) w_surf1(nd)  
+      ENDDO
+      CLOSE(fid_w)
+  ENDIF  
+!!$OMP END SECTIONS   
+!!$OMP END PARALLEL  
+  
+  bin_output_count = bin_output_count + 1
+  CALL H2Ocean_Time_Output_Once
+END SUBROUTINE H2Ocean_BIN_Output_Once
+ 
+!
+SUBROUTINE H2Ocean_Station_OutputOnce
+  USE Mod_Precision
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  USE Mod_All_Variable
+  USE Mod_TriMesh_Interp
+  IMPLICIT NONE
+  INTEGER :: i 
+  INTEGER(KIND=INT_KIND)  :: el,nd 
+  REAL(kind=REAL_DP)      :: z_out(n_station), xin, yin
+  CHARACTER(50)           :: xstring
+
+  z_out =0.d0;
+  DO i=1,n_station
+       xin = station_info(i,2)
+       yin = station_info(i,3)
+       el  = station_el(i)
+       CALL TriMesh_Interp_Element(xin,yin,el,zeta1,z_out(i))  
+  ENDDO 
+  WRITE (xstring,'I3') n_station   
+  xstring =  '(f15.5 '//trim(ADJUSTL(xstring))//'es15.5e3)' 
+  xstring = TRIM(ADJUSTL(xstring)) 
+  WRITE(station_fid, xstring),time_run, DBLE(z_out)
+END SUBROUTINE
+!
+!
+!
+SUBROUTINE H2Ocean_Station_vel_OutputOnce
+  USE Mod_Precision
+  USE Mod_TriMesh
+  USE Mod_H2Ocean
+  USE Mod_All_Variable
+  IMPLICIT NONE
+  INTEGER :: i
+  INTEGER(KIND=INT_KIND)  :: edg 
+  REAL(kind=REAL_DP)      :: z_out(n_station_vel*2), xin, yin
+  CHARACTER(50)           :: xstring
+  z_out =0;
+  DO i=1,n_station_vel
+       edg  = station_vel_edg(i)
+       z_out(2*i-1) = velocity1(edg)%u
+       z_out(2*i)   = velocity1(edg)%v   
+  ENDDO 
+  WRITE (xstring,'I3') n_station_vel*2 
+  xstring =  '(f15.5 '//trim(ADJUSTL(xstring))//'es15.5e3)' 
+  xstring = TRIM(ADJUSTL(xstring)) 
+  WRITE(station_vel_fid,xstring),time_run, DBLE(z_out)
+END SUBROUTINE H2Ocean_Station_vel_OutputOnce
